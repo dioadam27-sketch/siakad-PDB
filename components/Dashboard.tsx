@@ -1,380 +1,371 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, Course, AvailableSchedule } from '../types';
-import { ACADEMIC_PERIODS, INITIAL_AVAILABLE_SCHEDULES, DAYS, LECTURERS } from '../constants';
-import CourseTable from './CourseTable';
-import CreateCourseForm from './CreateCourseForm';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { User, AvailableSchedule } from '../types.ts';
+import { ACADEMIC_PERIODS } from '../constants.tsx';
+import CourseTable from './CourseTable.tsx';
+import CreateCourseForm from './CreateCourseForm.tsx';
+import * as dbService from '../dbService.ts';
 
 interface DashboardProps {
   user: User;
+  initialPeriodId?: string;
 }
 
 type TabKey = 'Rincian' | 'Pilih Jadwal' | 'Monitoring' | 'Master Dosen';
 
-type SortConfig = {
-  key: string;
-  direction: 'asc' | 'desc';
-} | null;
-
-const Dashboard: React.FC<DashboardProps> = ({ user }) => {
-  const [selectedPeriod, setSelectedPeriod] = useState(ACADEMIC_PERIODS[0].id);
-  const [myCourses, setMyCourses] = useState<Course[]>([]);
+const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
+  const [globalActivePeriodId, setGlobalActivePeriodId] = useState(dbService.getActivePeriodId());
+  const [selectedPeriod, setSelectedPeriod] = useState(initialPeriodId || dbService.getActivePeriodId());
   const [availableSchedules, setAvailableSchedules] = useState<AvailableSchedule[]>([]);
   const [lecturersList, setLecturersList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('Rincian');
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'name', direction: 'asc' });
-
-  const [showAddDosen, setShowAddDosen] = useState(false);
-  const [newDosen, setNewDosen] = useState({ name: '', nip: '', nmJabatanFungsional: 'Asisten Ahli' });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSwitchingPage, setIsSwitchingPage] = useState(false);
+  const [showPeriodPicker, setShowPeriodPicker] = useState(false);
 
   const isAdmin = user.role === 'Admin';
   const MAX_LECTURERS = 2;
 
   useEffect(() => {
-    const savedMyCourses = localStorage.getItem(`my_courses_${user.nip}`);
-    const savedAvailable = localStorage.getItem('available_schedules_pool');
-    const savedLecturers = localStorage.getItem('master_lecturers');
-    
-    if (savedMyCourses) setMyCourses(JSON.parse(savedMyCourses));
-    if (savedAvailable) {
-      setAvailableSchedules(JSON.parse(savedAvailable));
-    } else {
-      setAvailableSchedules(INITIAL_AVAILABLE_SCHEDULES);
-      localStorage.setItem('available_schedules_pool', JSON.stringify(INITIAL_AVAILABLE_SCHEDULES));
-    }
-    if (savedLecturers) {
-      setLecturersList(JSON.parse(savedLecturers));
-    } else {
-      setLecturersList(LECTURERS);
-      localStorage.setItem('master_lecturers', JSON.stringify(LECTURERS));
-    }
-  }, [user.nip]);
-
-  useEffect(() => {
-    localStorage.setItem(`my_courses_${user.nip}`, JSON.stringify(myCourses));
-  }, [myCourses, user.nip]);
-
-  const updateGlobalPool = (pool: AvailableSchedule[]) => {
-    setAvailableSchedules(pool);
-    localStorage.setItem('available_schedules_pool', JSON.stringify(pool));
-  };
-
-  const updateLecturerMaster = (list: any[]) => {
-    setLecturersList(list);
-    localStorage.setItem('master_lecturers', JSON.stringify(list));
-  };
-
-  const handleAdminCreateSchedule = (newSchedule: AvailableSchedule) => {
-    updateGlobalPool([...availableSchedules, newSchedule]);
-    setActiveTab('Rincian');
-  };
-
-  const handleAdminBulkCreateSchedule = (newSchedules: AvailableSchedule[]) => {
-    updateGlobalPool([...availableSchedules, ...newSchedules]);
-    setActiveTab('Rincian');
-  };
-
-  const handleDosenPickSchedule = (scheduleId: string) => {
-    const schedule = availableSchedules.find(s => s.id === scheduleId);
-    if (schedule) {
-      if (schedule.claimants.some(c => c.nip === user.nip)) {
-        alert("Anda sudah mengambil jadwal ini.");
-        return;
-      }
-      if (schedule.claimants.length >= MAX_LECTURERS) {
-        alert("Maaf, jadwal ini sudah penuh (maksimal 2 dosen).");
-        return;
-      }
-      const newClaimant = { nip: user.nip, name: user.name, jabatan: user.nmJabatanFungsional };
-      const updatedPool = availableSchedules.map(s => 
-        s.id === scheduleId ? { ...s, isClaimed: true, claimants: [...s.claimants, newClaimant] } : s
-      );
-      setMyCourses(prev => [...prev, { ...schedule }]);
-      updateGlobalPool(updatedPool);
-      setActiveTab('Rincian');
-    }
-  };
-
-  const handleDeleteCourse = (id: string) => {
-    setMyCourses(prev => prev.filter(c => c.id !== id));
-    const updatedPool = availableSchedules.map(s => {
-      if (s.id === id) {
-        const remaining = s.claimants.filter(c => c.nip !== user.nip);
-        return { ...s, claimants: remaining, isClaimed: remaining.length > 0 };
-      }
-      return s;
+    const unsubSchedules = dbService.subscribeToSchedules((data) => {
+      setAvailableSchedules(data);
+      setIsLoading(false);
     });
-    updateGlobalPool(updatedPool);
+
+    const unsubLecturers = dbService.subscribeToLecturers((data) => {
+      setLecturersList(data);
+    });
+
+    const unsubActivePeriod = dbService.subscribeToActivePeriod((id) => {
+      setGlobalActivePeriodId(id);
+      if (!isAdmin && !initialPeriodId) {
+        setSelectedPeriod(id);
+      }
+    });
+
+    return () => {
+      unsubSchedules();
+      unsubLecturers();
+      unsubActivePeriod();
+    };
+  }, [isAdmin, initialPeriodId]);
+
+  const selectedPeriodLabel = useMemo(() => {
+    return ACADEMIC_PERIODS.find(p => p.id === selectedPeriod)?.label || '';
+  }, [selectedPeriod]);
+
+  const handlePeriodChange = (newPeriodId: string) => {
+    setIsSwitchingPage(true);
+    setSelectedPeriod(newPeriodId);
+    setShowPeriodPicker(false);
+    setTimeout(() => {
+      setIsSwitchingPage(false);
+    }, 300);
   };
 
-  const sortedData = useMemo(() => {
-    let items = activeTab === 'Master Dosen' ? [...lecturersList] : [...availableSchedules];
-    if (sortConfig !== null) {
-      items.sort((a: any, b: any) => {
-        if (sortConfig.key === 'day') {
-           const aIndex = DAYS.indexOf(a.day || '');
-           const bIndex = DAYS.indexOf(b.day || '');
-           if (aIndex < bIndex) return sortConfig.direction === 'asc' ? -1 : 1;
-           if (aIndex > bIndex) return sortConfig.direction === 'asc' ? 1 : -1;
-           return 0;
-        }
-        const aVal = (a[sortConfig.key] || '').toString().toLowerCase();
-        const bVal = (b[sortConfig.key] || '').toString().toLowerCase();
-        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
+  const currentPeriodSchedules = useMemo(() => {
+    return availableSchedules.filter(s => s.academicYear === selectedPeriodLabel);
+  }, [availableSchedules, selectedPeriodLabel]);
+
+  const myCourses = useMemo(() => {
+    return currentPeriodSchedules.filter(s => s.claimants?.some(c => c.nip === user.nip));
+  }, [currentPeriodSchedules, user.nip]);
+
+  const availableToPick = useMemo(() => {
+    return currentPeriodSchedules.filter(s => !s.claimants?.some(c => c.nip === user.nip));
+  }, [currentPeriodSchedules, user.nip]);
+
+  const handleAdminCreateSchedule = async (newSchedule: AvailableSchedule) => {
+    await dbService.addScheduleToDb(newSchedule);
+    setActiveTab('Rincian');
+  };
+
+  const handleAdminBulkCreateSchedule = async (newSchedules: AvailableSchedule[]) => {
+    for (const s of newSchedules) {
+      await dbService.addScheduleToDb(s);
     }
-    return items;
-  }, [availableSchedules, lecturersList, sortConfig, activeTab]);
-
-  const requestSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-    setSortConfig({ key, direction });
+    setActiveTab('Rincian');
   };
 
-  const handleExportPDF = () => {
+  const handleDosenPickSchedule = async (scheduleId: string) => {
     try {
-      const doc = new jsPDF('landscape');
-      doc.setFontSize(18);
-      doc.text('Laporan Monitoring Jadwal PDB', 14, 20);
-      const periodLabel = ACADEMIC_PERIODS.find(p => p.id === selectedPeriod)?.label || '';
-      doc.setFontSize(10);
-      doc.setTextColor(100);
-      doc.text(`Periode: ${periodLabel}`, 14, 28);
-      const headers = [["No", "Mata Kuliah", "Kelas", "Hari", "Waktu", "Ruang", "Status", "Pengampu"]];
-      const rows = availableSchedules.map((s, index) => [
-        index + 1,
-        `${s.name}\n(${s.code})`,
-        s.classCode,
-        s.day || '-',
-        `${s.startTime || '-'} - ${s.endTime || '-'}`,
-        s.room || '-',
-        s.claimants.length >= MAX_LECTURERS ? "Penuh" : (s.claimants.length > 0 ? `Terisi (${s.claimants.length})` : "Kosong"),
-        s.claimants.map(c => `${c.name} (${c.nip})`).join('\n')
-      ]);
-      autoTable(doc, { head: headers, body: rows, startY: 40, theme: 'grid' });
-      doc.save(`Monitoring_Jadwal_PDB_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (err) { alert("Ekspor PDF gagal."); }
+      const claimant = { nip: user.nip, name: user.name, jabatan: user.nmJabatanFungsional };
+      await dbService.claimScheduleInDb(scheduleId, claimant, MAX_LECTURERS);
+      setActiveTab('Rincian');
+    } catch (err: any) {
+      alert(err.message);
+    }
   };
 
-  const wrapInExcelHtml = (tableHtml: string) => `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-    <head><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Template</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><meta charset="utf-8"></head>
-    <body>${tableHtml}</body>
-    </html>
-  `;
-
-  const handleDownloadTemplate = () => {
-    const table = `
-      <table border="1">
-        <thead>
-          <tr style="background-color: #10b981; color: white; font-weight: bold;">
-            <th>Nama Lengkap</th><th>NIP</th><th>Jabatan Fungsional</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>Dosen Contoh, Ph.D.</td><td>198001012023011001</td><td>Asisten Ahli</td></tr>
-        </tbody>
-      </table>
-    `;
-    const blob = new Blob([wrapInExcelHtml(table)], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "template_master_dosen.xls";
-    link.click();
+  const handleDeleteCourse = async (id: string) => {
+    if (isAdmin) {
+      if (window.confirm("Hapus jadwal ini dari database master?")) {
+        await dbService.deleteScheduleFromDb(id);
+      }
+    } else {
+      if (window.confirm("Batalkan klaim jadwal mengajar Anda?")) {
+        await dbService.unclaimScheduleInDb(id, user.nip);
+      }
+    }
   };
 
-  const handleDownloadScheduleTemplate = () => {
-    const table = `
-      <table border="1">
-        <thead>
-          <tr style="background-color: #10b981; color: white; font-weight: bold;">
-            <th>Nama Mata Kuliah</th><th>Kode MK</th><th>SKS</th><th>Kelas</th><th>Hari</th><th>Jam Mulai</th><th>Jam Selesai</th><th>Ruang</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>Agama Islam 1</td><td>UAK25000001</td><td>2</td><td>PDB01</td><td>Senin</td><td>08:00</td><td>09:40</td><td>GC-3.05</td></tr>
-        </tbody>
-      </table>
-    `;
-    const blob = new Blob([wrapInExcelHtml(table)], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "template_jadwal.xls";
-    link.click();
-  };
-
-  const handleAddLecturer = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newDosen.name || !newDosen.nip) return;
-    if (lecturersList.some(l => l.nip === newDosen.nip)) { alert("NIP sudah terdaftar!"); return; }
-    updateLecturerMaster([...lecturersList, newDosen]);
-    setNewDosen({ name: '', nip: '', nmJabatanFungsional: 'Asisten Ahli' });
-    setShowAddDosen(false);
-  };
-
-  const handleDeleteLecturer = (nip: string) => {
-    if (window.confirm("Hapus dosen dari master?")) updateLecturerMaster(lecturersList.filter(l => l.nip !== nip));
-  };
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
+        <div className="w-14 h-14 border-[5px] border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-400 font-bold tracking-wide uppercase text-xs">Memuat Data Akademik...</p>
+      </div>
+    );
+  }
 
   const tabs: TabKey[] = isAdmin 
     ? ['Rincian', 'Pilih Jadwal', 'Monitoring', 'Master Dosen'] 
     : ['Rincian', 'Pilih Jadwal'];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-700 max-w-7xl mx-auto px-4 py-8">
-      <div className="bg-[#FFF9F2] rounded-[2rem] shadow-sm border border-orange-100 p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <div className={`space-y-6 max-w-7xl mx-auto pb-12 transition-all duration-500 ease-in-out ${isSwitchingPage ? 'opacity-0 scale-[0.98] blur-sm' : 'opacity-100 scale-100 blur-0'}`}>
+      {/* Header Section */}
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 p-8 md:p-10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
           <div className="space-y-2">
-            <h2 className="text-3xl font-black text-slate-800 tracking-tight">
-              {isAdmin ? 'Manajemen Master Jadwal' : 'Manajemen Jadwal & Ruang'}
+            <h2 className="text-4xl font-black text-slate-800 tracking-tight leading-tight">
+              {isAdmin ? 'Dashboard Admin PDB' : 'Portal Mengajar Dosen'}
             </h2>
-            <p className="text-slate-500 text-lg">
-              {isAdmin ? 'Kelola master dosen, jadwal, dan monitoring.' : 'Lihat rincian jadwal atau pilih jadwal mengajar.'}
+            <p className="text-slate-500 font-medium text-lg">
+              Sistem koordinasi jadwal dan ruang kuliah terintegrasi.
             </p>
           </div>
-          <div className="flex items-center">
-            <div className="relative group">
-              <select
-                value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 rounded-2xl px-6 py-4 pr-12 font-bold text-slate-700 focus:ring-4 focus:ring-indigo-100 outline-none cursor-pointer hover:border-indigo-300 transition-all text-base shadow-sm"
-              >
-                {ACADEMIC_PERIODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 group-hover:text-indigo-500 transition-colors">
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
-              </div>
-            </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+             <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-2xl flex items-center space-x-3">
+               <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sistem Online</span>
+             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-12 mt-12 border-b border-slate-100">
+        {/* Navigation Tabs */}
+        <div className="flex flex-wrap gap-10 mt-12 border-b border-slate-50">
           {tabs.map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`pb-4 px-2 text-base font-extrabold transition-all border-b-4 -mb-[2px] ${
-                activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+              className={`pb-5 px-2 text-sm font-black uppercase tracking-widest transition-all border-b-[3px] -mb-[2px] ${
+                activeTab === tab 
+                  ? 'border-indigo-600 text-indigo-600' 
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
               }`}
             >
-              {isAdmin && tab === 'Pilih Jadwal' ? 'Input Jadwal Baru' : tab}
+              {tab}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="bg-[#FFF9F2] rounded-[2.5rem] shadow-sm border border-orange-100 min-h-[500px] overflow-hidden p-8">
+      {/* Content Area */}
+      <div className="bg-white rounded-[3rem] shadow-sm border border-slate-100 min-h-[600px] p-8 md:p-12">
+        
+        {/* Tab Rincian */}
         {activeTab === 'Rincian' && (
-          <div className="animate-in fade-in slide-in-from-top-4 duration-500">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-2xl font-black text-slate-800">{isAdmin ? 'Master Pool Jadwal' : `Jadwal Mengajar - ${user.name}`}</h3>
-              <div className="flex space-x-3">
-                {isAdmin && (
-                  <button onClick={handleDownloadScheduleTemplate} className="flex items-center space-x-3 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-4 rounded-2xl font-black transition-all shadow-xl active:scale-95">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    <span>Template Excel</span>
-                  </button>
-                )}
-                <button onClick={() => setActiveTab('Pilih Jadwal')} className="flex items-center space-x-3 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black transition-all shadow-xl active:scale-95">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
-                  <span>{isAdmin ? 'Tambah Master MK' : 'Tambah MK'}</span>
-                </button>
-              </div>
-            </div>
-            {isAdmin ? (
-              <CourseTable courses={availableSchedules} onDelete={(id) => updateGlobalPool(availableSchedules.filter(s => s.id !== id))} />
-            ) : (
-              myCourses.length > 0 ? <CourseTable courses={myCourses} onDelete={handleDeleteCourse} /> : (
-                <div className="py-24 text-center flex flex-col items-center">
-                  <div className="bg-[#F1F5F9] w-36 h-36 rounded-full flex items-center justify-center mb-10 shadow-inner group">
-                    <svg className="w-16 h-16 text-slate-300 group-hover:scale-110 transition-transform duration-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+          <div className="space-y-10 animate-in fade-in duration-700">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h3 className="text-3xl font-black text-slate-800">
+                  {isAdmin ? `Data Induk Jadwal` : 'Jadwal Mengajar'}
+                </h3>
+                <div className="flex items-center space-x-3 mt-3">
+                  <div className="relative">
+                    <button 
+                      onClick={() => isAdmin && setShowPeriodPicker(!showPeriodPicker)}
+                      className={`px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider border flex items-center transition-all ${
+                        isAdmin ? 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100' : 'bg-slate-50 text-slate-500 border-slate-200 cursor-default'
+                      }`}
+                    >
+                      <span className="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span>
+                      Semester: {selectedPeriodLabel}
+                      {isAdmin && (
+                        <svg className="w-3.5 h-3.5 ml-2 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      )}
+                    </button>
+                    {showPeriodPicker && isAdmin && (
+                      <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 overflow-hidden py-2 animate-in zoom-in-95 duration-200">
+                        {ACADEMIC_PERIODS.map(p => (
+                          <button 
+                            key={p.id}
+                            onClick={() => handlePeriodChange(p.id)}
+                            className={`w-full text-left px-5 py-3 text-xs font-bold transition-colors hover:bg-slate-50 ${selectedPeriod === p.id ? 'text-indigo-600' : 'text-slate-600'}`}
+                          >
+                            {p.label} {globalActivePeriodId === p.id && ' (✓ Aktif)'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <h4 className="text-3xl font-black text-slate-800 mb-4">Jadwal Masih Kosong</h4>
-                  <button onClick={() => setActiveTab('Pilih Jadwal')} className="bg-indigo-600 hover:bg-indigo-700 text-white px-12 py-5 rounded-[2rem] font-black text-xl transition-all shadow-2xl active:scale-95">Pilih Mata Kuliah</button>
+
+                  {globalActivePeriodId === selectedPeriod && (
+                    <div className="px-3 py-1.5 bg-emerald-50 rounded-xl text-[11px] font-black text-emerald-600 uppercase tracking-wider border border-emerald-100 flex items-center">
+                      <svg className="w-3.5 h-3.5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" />
+                      </svg>
+                      AKTIF
+                    </div>
+                  )}
                 </div>
-              )
+              </div>
+              {!isAdmin && (
+                <button 
+                  onClick={() => setActiveTab('Pilih Jadwal')} 
+                  className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95"
+                >
+                  Tambah Jadwal
+                </button>
+              )}
+            </div>
+            {(isAdmin ? currentPeriodSchedules : myCourses).length > 0 ? (
+              <CourseTable courses={isAdmin ? currentPeriodSchedules : myCourses} onDelete={handleDeleteCourse} />
+            ) : (
+              <div className="text-center py-32 border-[3px] border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20">
+                <div className="w-24 h-24 bg-white rounded-[2rem] shadow-sm border border-slate-50 flex items-center justify-center mx-auto mb-8">
+                  <svg className="w-12 h-12 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h4 className="text-xl font-bold text-slate-600">Data Tidak Ditemukan</h4>
+                <p className="text-slate-400 font-medium mt-2 max-w-sm mx-auto">
+                  Belum ada rekaman jadwal untuk periode <span className="text-indigo-500 font-black">{selectedPeriodLabel}</span>.
+                </p>
+              </div>
             )}
           </div>
         )}
 
+        {/* Tab Pilih Jadwal */}
         {activeTab === 'Pilih Jadwal' && (
-          <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
+          <div className="space-y-10 animate-in slide-in-from-right-8 duration-700">
             {isAdmin ? (
-              <CreateCourseForm onSave={handleAdminCreateSchedule} onBulkSave={handleAdminBulkCreateSchedule} onCancel={() => setActiveTab('Rincian')} selectedPeriodLabel={ACADEMIC_PERIODS.find(p => p.id === selectedPeriod)?.label || ''} />
+              <CreateCourseForm 
+                onSave={handleAdminCreateSchedule} 
+                onBulkSave={handleAdminBulkCreateSchedule} 
+                onCancel={() => setActiveTab('Rincian')} 
+                selectedPeriodLabel={selectedPeriodLabel}
+                existingSchedules={availableSchedules}
+              />
             ) : (
-              <div className="space-y-10">
-                <div className="border-b border-orange-100 pb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div><h4 className="text-3xl font-black text-slate-800 mb-3">Pilih Jadwal Kuliah</h4></div>
-                  <div className="flex space-x-4"><button onClick={() => requestSort('name')} className="px-4 py-2 rounded-lg text-sm font-black bg-indigo-600 text-white">Nama</button></div>
+              <div className="space-y-8">
+                <div className="bg-indigo-600 p-8 rounded-[2rem] shadow-2xl shadow-indigo-100 relative overflow-hidden">
+                  <h4 className="text-white text-2xl font-black mb-2 relative z-10">Pendaftaran Mengajar - {selectedPeriodLabel}</h4>
+                  <p className="text-indigo-100 text-sm font-medium relative z-10 opacity-80">Silakan pilih dan klaim jadwal kelas yang tersedia di bawah ini.</p>
                 </div>
-                <div className="grid grid-cols-1 gap-8">
-                  {(sortedData as AvailableSchedule[]).filter(s => !s.claimants.some(c => c.nip === user.nip)).map(schedule => {
-                    const isFull = schedule.claimants.length >= MAX_LECTURERS;
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {availableToPick.length > 0 ? availableToPick.map(s => {
+                    const claimedCount = s.claimants?.length || 0;
+                    const remainingSlots = MAX_LECTURERS - claimedCount;
+                    const isFull = remainingSlots <= 0;
+                    
                     return (
-                      <div key={schedule.id} className={`bg-white border border-slate-100 p-8 rounded-[2.5rem] flex flex-col md:flex-row md:items-center justify-between hover:shadow-2xl transition-all ${isFull ? 'opacity-70' : ''}`}>
-                        <div><h5 className="font-black text-2xl text-slate-800">{schedule.name}</h5><p>{schedule.day} | {schedule.startTime} - {schedule.endTime}</p></div>
-                        <button onClick={() => !isFull && handleDosenPickSchedule(schedule.id)} disabled={isFull} className={`px-10 py-5 rounded-[2rem] font-black text-xl ${isFull ? 'bg-slate-300' : 'bg-indigo-600 text-white'}`}>{isFull ? 'Penuh' : 'Pilih Jadwal'}</button>
+                      <div key={s.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 group hover:shadow-2xl transition-all duration-500 relative overflow-hidden">
+                        {/* Slot Badge */}
+                        <div className={`absolute top-0 right-0 px-6 py-2 rounded-bl-3xl text-[10px] font-black uppercase tracking-widest ${
+                          isFull ? 'bg-slate-100 text-slate-400' : remainingSlots === 1 ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
+                        }`}>
+                          {isFull ? 'PENUH' : `SISA ${remainingSlots} SLOT`}
+                        </div>
+
+                        <div className="space-y-4 flex-1">
+                          <div className="flex items-center space-x-3">
+                            <span className="px-3 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-black rounded-xl uppercase tracking-widest border border-indigo-100">{s.classCode}</span>
+                            <h4 className="font-black text-xl text-slate-800 group-hover:text-indigo-600 transition-colors">{s.name}</h4>
+                          </div>
+                          <div className="space-y-2">
+                             <p className="text-slate-500 font-bold text-sm flex items-center">
+                               {s.day}, {s.startTime} - {s.endTime}
+                             </p>
+                             <p className="text-slate-500 font-bold text-sm flex items-center">
+                               Ruang {s.room}
+                             </p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleDosenPickSchedule(s.id)} 
+                          disabled={isFull}
+                          className={`w-full sm:w-auto px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-sm active:scale-95 ${
+                            isFull 
+                              ? 'bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100' 
+                              : 'bg-white text-indigo-600 border-2 border-indigo-50 hover:bg-indigo-600 hover:text-white'
+                          }`}
+                        >
+                          {isFull ? 'PENUH' : 'KLAIM JADWAL'}
+                        </button>
                       </div>
                     );
-                  })}
+                  }) : <div className="md:col-span-2 text-center py-32 border-[3px] border-dashed border-slate-100 rounded-[3rem] bg-slate-50/10">Tidak ada jadwal yang tersedia.</div>}
                 </div>
               </div>
             )}
           </div>
         )}
 
+        {/* Monitoring & Master Dosen */}
         {activeTab === 'Monitoring' && isAdmin && (
-          <div className="animate-in fade-in slide-in-from-right-8 duration-500">
-            <div className="flex justify-between items-center mb-10">
-              <h4 className="text-3xl font-black text-slate-800">Monitoring Jadwal</h4>
-              <button onClick={handleExportPDF} className="bg-red-600 hover:bg-red-700 text-white px-8 py-4 rounded-2xl font-black">Download PDF</button>
-            </div>
-            <table className="w-full border-separate border-spacing-y-4">
-              <thead><tr className="text-slate-400"><th>MK</th><th>Kelas</th><th>Status</th><th>Pengampu</th></tr></thead>
-              <tbody>
-                {(sortedData as AvailableSchedule[]).map(s => (
-                  <tr key={s.id} className="bg-white p-6 shadow-sm">
-                    <td>{s.name}</td><td>{s.classCode}</td><td>{s.claimants.length}/2</td><td>{s.claimants.map(c => c.name).join(', ')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="animate-in fade-in duration-700">
+             <div className="flex justify-between items-center mb-8">
+               <h3 className="text-3xl font-black text-slate-800">Monitoring Pengampuan</h3>
+               <button onClick={() => window.print()} className="bg-slate-800 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-black transition-all">Cetak Laporan</button>
+             </div>
+             <div className="overflow-x-auto rounded-[1.5rem] border border-slate-100">
+               <table className="w-full text-left">
+                 <thead>
+                   <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase font-black tracking-[0.2em]"><th className="py-6 px-6">Mata Kuliah PDB</th><th className="py-6 px-6 text-center">Kelas</th><th className="py-6 px-6 text-center">Kuota & Sisa Slot</th><th className="py-6 px-6">Dosen Terdaftar</th></tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-50">
+                   {currentPeriodSchedules.map(s => {
+                     const claimedCount = s.claimants?.length || 0;
+                     const remaining = MAX_LECTURERS - claimedCount;
+                     return (
+                       <tr key={s.id} className="text-sm">
+                         <td className="py-6 px-6 font-black text-slate-800 text-base">{s.name}</td>
+                         <td className="py-6 px-6 text-center"><span className="bg-white px-4 py-2 rounded-xl border border-slate-100 font-black text-slate-600">{s.classCode}</span></td>
+                         <td className="py-6 px-6 text-center">
+                           <div className="flex flex-col items-center">
+                             <span className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border ${remaining === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                               {claimedCount} / {MAX_LECTURERS} Terisi
+                             </span>
+                             <span className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-tight">
+                               {remaining === 0 ? 'Kuota Terpenuhi' : `Sisa ${remaining} Slot`}
+                             </span>
+                           </div>
+                         </td>
+                         <td className="py-6 px-6">{s.claimants?.map(c => <div key={c.nip} className="text-xs font-bold text-slate-600 leading-relaxed">• {c.name}</div>) || <span className="text-slate-300 italic">Belum ada dosen</span>}</td>
+                       </tr>
+                     );
+                   })}
+                 </tbody>
+               </table>
+             </div>
           </div>
         )}
 
         {activeTab === 'Master Dosen' && isAdmin && (
-          <div className="animate-in fade-in slide-in-from-left-8 duration-500">
-            <div className="flex justify-between items-center mb-10">
-              <h4 className="text-3xl font-black text-slate-800">Master Dosen</h4>
-              <div className="flex space-x-3">
-                <button onClick={handleDownloadTemplate} className="bg-emerald-600 text-white px-6 py-4 rounded-2xl font-black">Template Excel</button>
-                <button onClick={() => setShowAddDosen(true)} className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black">Tambah Dosen</button>
-              </div>
-            </div>
-            {showAddDosen && (
-              <form onSubmit={handleAddLecturer} className="p-8 bg-white border-2 border-emerald-100 rounded-[2rem] mb-10 grid grid-cols-3 gap-6">
-                <input type="text" value={newDosen.name} onChange={e => setNewDosen({...newDosen, name: e.target.value})} className="border p-3" placeholder="Nama" required />
-                <input type="text" value={newDosen.nip} onChange={e => setNewDosen({...newDosen, nip: e.target.value})} className="border p-3" placeholder="NIP" required />
-                <button type="submit" className="bg-emerald-600 text-white font-bold">Simpan</button>
-              </form>
-            )}
-            <table className="w-full border-separate border-spacing-y-4 text-left">
-              <thead><tr><th>Nama</th><th>NIP</th><th>Aksi</th></tr></thead>
-              <tbody>
-                {lecturersList.map(l => (
-                  <tr key={l.nip} className="bg-white p-6"><td>{l.name}</td><td>{l.nip}</td><td><button onClick={() => handleDeleteLecturer(l.nip)} className="text-red-500 font-bold">Hapus</button></td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+           <div className="space-y-10 animate-in fade-in duration-700">
+             <div className="flex justify-between items-center mb-4">
+               <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database Tenaga Pendidik</h3>
+               <div className="bg-indigo-600 text-white px-6 py-3 rounded-[1.25rem] font-black text-xs uppercase tracking-[0.2em]">{lecturersList.length} Dosen</div>
+             </div>
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               {lecturersList.map(l => (
+                 <div key={l.nip} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center group hover:shadow-2xl transition-all border-l-[6px] hover:border-l-indigo-600">
+                   <div className="space-y-1">
+                     <p className="font-black text-slate-800 text-lg leading-tight truncate">{l.name}</p>
+                     <p className="text-[10px] font-bold text-slate-400 tracking-[0.1em]">NIP. {l.nip}</p>
+                   </div>
+                   <button onClick={async () => { if(confirm(`Hapus data ${l.name}?`)) await dbService.deleteLecturerFromDb(l.nip); }} className="p-3 text-slate-200 hover:text-red-500 rounded-2xl transition-all"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                 </div>
+               ))}
+             </div>
+           </div>
         )}
+
       </div>
     </div>
   );

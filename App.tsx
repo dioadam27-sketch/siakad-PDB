@@ -1,20 +1,27 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, TabType } from './types';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
+import { User } from './types.ts';
+import { ACADEMIC_PERIODS } from './constants.tsx';
+import Login from './components/Login.tsx';
+import Dashboard from './components/Dashboard.tsx';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Simple persistence check
   useEffect(() => {
+    // Restore session sederhana dari localStorage
     const savedUser = localStorage.getItem('academic_user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setIsAuthenticated(true);
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        setUser(parsedUser);
+        setIsAuthenticated(true);
+      } catch (e) {
+        localStorage.removeItem('academic_user');
+      }
     }
   }, []);
 
@@ -28,15 +35,63 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setUser(null);
     setIsAuthenticated(false);
+    setSelectedSemesterId(null);
     localStorage.removeItem('academic_user');
   };
 
   const handleGoHome = () => {
+    setSelectedSemesterId(null);
     setRefreshKey(prev => prev + 1);
   };
 
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
+  }
+
+  // View Pemilihan Semester
+  if (!selectedSemesterId) {
+    return (
+      <div className="min-h-screen bg-[#3730A3] flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl bg-[#FFF9F2] rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+          <div className="p-10 md:p-16 text-center">
+            <div className="bg-indigo-100 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8 text-indigo-600">
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h2 className="text-4xl font-black text-slate-800 mb-4 tracking-tight">Pilih Semester Akademik</h2>
+            <p className="text-slate-500 text-lg mb-12 font-medium">Selamat datang, {user?.name}. Silakan tentukan periode akademik untuk sesi ini.</p>
+            
+            <div className="space-y-4 max-w-md mx-auto">
+              {ACADEMIC_PERIODS.map(period => (
+                <button
+                  key={period.id}
+                  onClick={() => setSelectedSemesterId(period.id)}
+                  className="w-full bg-white border-2 border-slate-100 hover:border-indigo-500 p-6 rounded-[2rem] flex items-center justify-between transition-all group hover:shadow-xl hover:-translate-y-1 active:scale-95"
+                >
+                  <div className="text-left">
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">{period.tahunAkademik}</p>
+                    <p className="text-xl font-black text-slate-800 group-hover:text-indigo-600 transition-colors">{period.namaSemester}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 group-hover:bg-indigo-600 group-hover:text-white rounded-2xl transition-all">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </button>
+              ))}
+            </div>
+            
+            <button 
+              onClick={handleLogout}
+              className="mt-12 text-slate-400 font-bold hover:text-red-500 transition-colors text-sm underline underline-offset-4"
+            >
+              Logout dari Akun
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -51,26 +106,17 @@ const App: React.FC = () => {
             </div>
             <h1 className="font-bold text-xl hidden sm:block">Sistem Akademik PDB</h1>
           </div>
-
           <button 
             onClick={handleGoHome}
             className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all text-sm font-bold border border-white/20"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-            </svg>
-            <span>Beranda</span>
+            <span>Ganti Semester</span>
           </button>
         </div>
         
         <div className="flex items-center space-x-6">
           <div className="text-right hidden sm:block">
             <p className="text-sm font-black tracking-tight uppercase leading-none mb-1">{user?.name}</p>
-            {user?.nmJabatanFungsional && (
-              <p className="text-[11px] text-indigo-200 font-black uppercase tracking-widest leading-none mb-1">
-                {user.nmJabatanFungsional}
-              </p>
-            )}
             <p className="text-[10px] text-indigo-300 font-bold opacity-80 leading-none">
               NIP: {user?.nip} • {user?.role}
             </p>
@@ -80,19 +126,16 @@ const App: React.FC = () => {
             className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-white/30 shadow-sm active:scale-95 flex items-center space-x-2"
           >
             <span>Logout</span>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
           </button>
         </div>
       </header>
 
       <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
-        <Dashboard key={refreshKey} user={user!} />
+        <Dashboard key={`${refreshKey}-${selectedSemesterId}`} user={user!} initialPeriodId={selectedSemesterId} />
       </main>
 
       <footer className="bg-white border-t p-4 text-center text-slate-500 text-sm">
-        &copy; 2024 Sistem Akademik PDB. Built for Modern Educators.
+        &copy; 2024 Sistem Akademik PDB.
       </footer>
     </div>
   );

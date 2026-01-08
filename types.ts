@@ -28,7 +28,7 @@ export interface Claimant {
 
 export interface AvailableSchedule extends Omit<Course, 'id'> {
   id: string;
-  isClaimed: boolean; // Keep for backwards compatibility/simplicity, interpreted as "At least one claimed"
+  isClaimed: boolean;
   claimants: Claimant[];
 }
 
@@ -44,5 +44,10 @@ export enum TabType {
 
 export interface AcademicPeriod {
   id: string;
-  label: string;
+  label: string; // Format: "2025/2026 - Ganjil"
+  tahunAkademik: string;
+  namaSemester: string;
+  groupSemester: string;
+  namaSemesterAsli: string;
+  tahun: string;
 }

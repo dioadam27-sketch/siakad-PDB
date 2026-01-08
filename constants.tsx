@@ -2,9 +2,12 @@
 import { Course, AcademicPeriod, Room, AvailableSchedule } from './types';
 
 export const ACADEMIC_PERIODS: AcademicPeriod[] = [
-  { id: '2025-1', label: '2025/2026 - Ganjil' },
-  { id: '2024-2', label: '2024/2025 - Genap' },
-  { id: '2024-1', label: '2024/2025 - Ganjil' },
+  { id: '2027-2', label: '2027/2028 - Genap', tahunAkademik: '2027/2028', namaSemester: 'Genap', groupSemester: 'Genap', namaSemesterAsli: 'Genap', tahun: '2027' },
+  { id: '2027-1', label: '2027/2028 - Ganjil', tahunAkademik: '2027/2028', namaSemester: 'Ganjil', groupSemester: 'Ganjil', namaSemesterAsli: 'Gasal', tahun: '2027' },
+  { id: '2026-2', label: '2026/2027 - Genap', tahunAkademik: '2026/2027', namaSemester: 'Genap', groupSemester: 'Genap', namaSemesterAsli: 'Genap', tahun: '2026' },
+  { id: '2026-1', label: '2026/2027 - Ganjil', tahunAkademik: '2026/2027', namaSemester: 'Ganjil', groupSemester: 'Ganjil', namaSemesterAsli: 'Ganjil', tahun: '2026' },
+  { id: '2025-2', label: '2025/2026 - Genap', tahunAkademik: '2025/2026', namaSemester: 'Genap', groupSemester: 'Genap', namaSemesterAsli: 'Genap', tahun: '2025' },
+  { id: '2025-1', label: '2025/2026 - Ganjil', tahunAkademik: '2025/2026', namaSemester: 'Ganjil', groupSemester: 'Ganjil', namaSemesterAsli: 'Ganjil', tahun: '2025' },
 ];
 
 export const LECTURERS = [
@@ -99,7 +102,7 @@ export const LECTURERS = [
   { name: 'Lingga Curnia Dewi', nip: '199012162024062002', nmJabatanFungsional: 'Asisten Ahli' },
   { name: 'Lukman Danu Saputra', nip: '198508182023113101', nmJabatanFungsional: 'Belum Punya Jabatan Fungsional' },
   { name: 'M. GANDUL ATIK YULIANI', nip: '197107161999032001', nmJabatanFungsional: 'Lektor' },
-  { name: 'MAHMUD ADITYA RIFQI', nip: '198812072015041003', nmJabatanFungsional: 'Lektor' },
+  { name: 'MAHMUD ADITYR RIFQI', nip: '198812072015041003', nmJabatanFungsional: 'Lektor' },
   { name: 'MAKHFUDLI', nip: '197902122014091003', nmJabatanFungsional: 'Lektor Kepala' },
   { name: 'MANIK RETNO WAHYUNITISARI', nip: '196605211997022001', nmJabatanFungsional: 'Lektor Kepala' },
   { name: 'MARDHAYU WULAN SARI', nip: '198502042008122004', nmJabatanFungsional: 'Asisten Ahli' },
@@ -406,7 +409,6 @@ export const MOCK_ROOMS: Room[] = rawRoomNames.map((name, index) => ({
 
 export const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
-// Pre-defined slots by Admin
 export const INITIAL_AVAILABLE_SCHEDULES: AvailableSchedule[] = [
   {
     id: 'as-1',
@@ -420,7 +422,7 @@ export const INITIAL_AVAILABLE_SCHEDULES: AvailableSchedule[] = [
     room: 'GC-3.05',
     isClaimed: false,
     claimants: [],
-    academicYear: '2025/2026'
+    academicYear: '2025/2026 - Ganjil'
   },
   {
     id: 'as-2',
@@ -434,7 +436,7 @@ export const INITIAL_AVAILABLE_SCHEDULES: AvailableSchedule[] = [
     room: 'GC-2.01',
     isClaimed: false,
     claimants: [],
-    academicYear: '2025/2026'
+    academicYear: '2025/2026 - Ganjil'
   },
   {
     id: 'as-3',
@@ -448,21 +450,7 @@ export const INITIAL_AVAILABLE_SCHEDULES: AvailableSchedule[] = [
     room: 'PN-2.01',
     isClaimed: false,
     claimants: [],
-    academicYear: '2025/2026'
-  },
-  {
-    id: 'as-4',
-    code: 'UAK25000009',
-    name: 'Bahasa Indonesia',
-    sks: 2,
-    classCode: 'PDB12',
-    day: 'Kamis',
-    startTime: '08:00',
-    endTime: '09:40',
-    room: 'GC-4.01',
-    isClaimed: false,
-    claimants: [],
-    academicYear: '2025/2026'
+    academicYear: '2025/2026 - Ganjil'
   }
 ];
 
