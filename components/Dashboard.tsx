@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect, useMemo, memo } from 'react';
 import { User, AvailableSchedule, Lecturer } from '../types.ts';
-import { ACADEMIC_PERIODS, MOCK_ROOMS, LECTURERS, INITIAL_AVAILABLE_SCHEDULES } from '../constants.tsx';
+import { ACADEMIC_PERIODS, MOCK_ROOMS } from '../constants.tsx';
 import CourseTable from './CourseTable.tsx';
 import CreateCourseForm from './CreateCourseForm.tsx';
 import * as dbService from '../dbService.ts';
 
-// Komponen Kecil untuk optimasi render list dosen
 const LecturerCard = memo(({ lecturer, onDelete }: { lecturer: Lecturer, onDelete: (nip: string) => void }) => (
   <div className="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center group hover:shadow-2xl transition-all border-l-[6px] hover:border-l-indigo-600 animate-in fade-in duration-300">
     <div className="space-y-1 overflow-hidden">
@@ -45,20 +44,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
   const MAX_LECTURERS = 2;
 
   useEffect(() => {
-    // Subscription Jadwal
-    const unsubSchedules = dbService.subscribeToSchedules((data, isFromCache) => {
+    const unsubSchedules = dbService.subscribeToSchedules((data) => {
       setAvailableSchedules(data);
-      if (!isFromCache) setSyncStatus('synced');
-      else setSyncStatus('syncing');
+      setSyncStatus('synced');
       setIsLoading(false);
     });
 
-    // Subscription Dosen
     const unsubLecturers = dbService.subscribeToLecturers((data) => {
       setLecturersList(data);
     });
 
-    // Subscription Periode
     const unsubActivePeriod = dbService.subscribeToActivePeriod((id) => {
       setGlobalActivePeriodId(id);
       if (!isAdmin && !initialPeriodId) {
@@ -84,7 +79,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
     setTimeout(() => setIsSwitchingPage(false), 200);
   };
 
-  // Optimasi filter menggunakan useMemo agar tidak lag saat list panjang
   const currentPeriodSchedules = useMemo(() => {
     return availableSchedules.filter(s => s.academicYear === selectedPeriodLabel);
   }, [availableSchedules, selectedPeriodLabel]);
@@ -98,11 +92,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
   }, [currentPeriodSchedules, user.nip]);
 
   const handleAdminCreateSchedule = async (newSchedule: AvailableSchedule) => {
+    setSyncStatus('syncing');
     await dbService.addScheduleToDb(newSchedule);
     setActiveTab('Rincian');
   };
 
   const handleAdminBulkCreateSchedule = async (newSchedules: AvailableSchedule[]) => {
+    setSyncStatus('syncing');
     for (const s of newSchedules) {
       await dbService.addScheduleToDb(s);
     }
@@ -111,17 +107,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
 
   const handleDosenPickSchedule = async (scheduleId: string) => {
     try {
+      setSyncStatus('syncing');
       const claimant = { nip: user.nip, name: user.name, jabatan: user.nmJabatanFungsional };
+      // LANGKAH 2: Menulis klaim ke Google Sheets yang sama
       await dbService.claimScheduleInDb(scheduleId, claimant, MAX_LECTURERS);
       setActiveTab('Rincian');
     } catch (err: any) {
       alert(err.message);
+      setSyncStatus('synced');
     }
   };
 
   const handleDeleteCourse = async (id: string) => {
     const msg = isAdmin ? "Hapus jadwal ini dari database pusat?" : "Batalkan klaim jadwal mengajar Anda?";
     if (window.confirm(msg)) {
+      setSyncStatus('syncing');
       if (isAdmin) await dbService.deleteScheduleFromDb(id);
       else await dbService.unclaimScheduleInDb(id, user.nip);
     }
@@ -131,6 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
     e.preventDefault();
     if(!newLecturer.name || !newLecturer.nip) return alert("Wajib diisi.");
     try {
+      setSyncStatus('syncing');
       await dbService.addLecturerToDb(newLecturer);
       setShowAddLecturerModal(false);
       setNewLecturer({ name: '', nip: '', nmJabatanFungsional: 'Asisten Ahli' });
@@ -141,29 +142,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
 
   const handleDeleteLecturer = async (nip: string) => {
     if(confirm(`Hapus data dosen ini dari Cloud?`)) {
+      setSyncStatus('syncing');
       await dbService.deleteLecturerFromDb(nip);
-    }
-  };
-
-  const handleDownloadBackup = async () => {
-    if(confirm("Unduh data lengkap dari Cloud Database (Format SQL)?")) {
-      await dbService.downloadDatabaseBackup();
-    }
-  };
-
-  const handleSeedData = async () => {
-    if(confirm("Isi database Cloud dengan data awal?")) {
-        setIsLoading(true);
-        await dbService.migrateLocalToCloud(INITIAL_AVAILABLE_SCHEDULES, LECTURERS);
-        setIsLoading(false);
     }
   };
 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] space-y-4 animate-pulse">
-        <div className="w-12 h-12 bg-indigo-100 rounded-full"></div>
-        <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Memulai Sinkronisasi...</p>
+        <div className="w-12 h-12 bg-indigo-100 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
+        <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Sinkronisasi Cloud Sheets...</p>
       </div>
     );
   }
@@ -174,6 +162,44 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
 
   return (
     <div className={`space-y-6 max-w-7xl mx-auto pb-12 transition-all duration-300 ease-out ${isSwitchingPage ? 'opacity-40 blur-sm scale-98' : 'opacity-100'}`}>
+      
+      {/* ALUR BISNIS INDICATOR (Satu Database Google Sheets) */}
+      {!isAdmin && (
+        <div className="bg-indigo-900 text-white rounded-[2.5rem] p-8 shadow-2xl overflow-hidden relative group">
+          <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:scale-125 transition-transform duration-1000"></div>
+          <div className="relative z-10">
+            <h4 className="text-xs font-black uppercase tracking-[0.2em] text-indigo-300 mb-6">Alur Sinkronisasi Google Sheets</h4>
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-8">
+              <div className={`flex items-center space-x-4 ${activeTab === 'Rincian' && myCourses.length === 0 ? 'opacity-100' : 'opacity-50'}`}>
+                <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black">1</div>
+                <div>
+                  <p className="font-bold text-sm">Persiapan Admin</p>
+                  <p className="text-[10px] text-indigo-300 font-medium">Data di Tab 'Schedules'</p>
+                </div>
+              </div>
+              <div className="hidden md:block w-12 h-px bg-white/20"></div>
+              <div className={`flex items-center space-x-4 ${activeTab === 'Pilih Jadwal' ? 'opacity-100' : 'opacity-50'}`}>
+                <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black">2</div>
+                <div>
+                  <p className="font-bold text-sm">Klaim Dosen</p>
+                  <p className="text-[10px] text-indigo-300 font-medium">Update Tab 'Schedules'</p>
+                </div>
+              </div>
+              <div className="hidden md:block w-12 h-px bg-white/20"></div>
+              <div className={`flex items-center space-x-4 ${activeTab === 'Rincian' && myCourses.length > 0 ? 'opacity-100' : 'opacity-50'}`}>
+                <div className="w-10 h-10 rounded-full bg-emerald-400 text-indigo-900 flex items-center justify-center font-black">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                </div>
+                <div>
+                  <p className="font-bold text-sm">Tersimpan</p>
+                  <p className="text-[10px] text-emerald-300 font-medium">File Sheets Terpusat</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Section */}
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 p-8 md:p-10">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
@@ -181,26 +207,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
             <h2 className="text-4xl font-black text-slate-800 tracking-tight leading-tight">
               {isAdmin ? 'Dashboard Admin PDB' : 'Portal Mengajar Dosen'}
             </h2>
-            <p className="text-slate-500 font-medium text-lg">
-              Sistem manajemen akademik <span className="text-indigo-600 font-black">Cloud Sync v2</span>.
-            </p>
+            <div className="flex items-center space-x-3">
+              <span className="text-slate-500 font-medium text-lg">Connected to</span>
+              <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-lg font-black text-xs border border-emerald-100 uppercase tracking-widest">Single Google Sheet</span>
+            </div>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-             {isAdmin && (
-               <>
-                <button onClick={handleSeedData} className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center space-x-2 border border-emerald-200 transition-all">
-                    <span className="text-xs font-black uppercase tracking-widest">Seed Cloud</span>
-                </button>
-                <button onClick={handleDownloadBackup} className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center space-x-2 border border-indigo-200 transition-all">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    <span className="text-xs font-black uppercase tracking-widest">Backup</span>
-                </button>
-               </>
-             )}
              <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-2xl flex items-center space-x-3 group">
                <span className={`w-2.5 h-2.5 rounded-full transition-colors ${syncStatus === 'syncing' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`}></span>
                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-600">
-                    {syncStatus === 'syncing' ? 'Syncing...' : 'Live Connected'}
+                    {syncStatus === 'syncing' ? 'Processing...' : 'Sync Active'}
                </span>
              </div>
           </div>
@@ -229,7 +245,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
                 <h3 className="text-3xl font-black text-slate-800">
-                  {isAdmin ? `Data Master Jadwal` : 'Jadwal Mengajar'}
+                  {isAdmin ? `Database Master Jadwal` : 'Rekap Mengajar Saya'}
                 </h3>
                 <div className="flex items-center space-x-3 mt-3">
                   <div className="relative">
@@ -254,13 +270,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                   </div>
                 </div>
               </div>
-              {!isAdmin && <button onClick={() => setActiveTab('Pilih Jadwal')} className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100">Tambah Jadwal</button>}
+              {!isAdmin && <button onClick={() => setActiveTab('Pilih Jadwal')} className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95">Klaim Jadwal Baru</button>}
             </div>
             {(isAdmin ? currentPeriodSchedules : myCourses).length > 0 ? (
               <CourseTable courses={isAdmin ? currentPeriodSchedules : myCourses} onDelete={handleDeleteCourse} />
             ) : (
               <div className="text-center py-32 border-[3px] border-dashed border-slate-50 rounded-[3rem] bg-slate-50/10">
-                <p className="text-slate-400 font-black text-xs uppercase tracking-widest">Belum ada rekaman jadwal</p>
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-200">
+                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253" /></svg>
+                </div>
+                <p className="text-slate-400 font-black text-xs uppercase tracking-widest">Belum ada rekaman jadwal di Google Sheets</p>
+                {!isAdmin && <button onClick={() => setActiveTab('Pilih Jadwal')} className="mt-6 text-indigo-600 font-bold hover:underline">Lihat Jadwal Tersedia &rarr;</button>}
               </div>
             )}
           </div>
@@ -278,6 +298,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
               />
             ) : (
               <div className="space-y-8">
+                <div className="bg-amber-50 border border-amber-100 p-6 rounded-3xl flex items-start gap-4 mb-8">
+                  <div className="bg-amber-100 p-2 rounded-xl text-amber-600">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </div>
+                  <p className="text-sm text-amber-800 font-medium leading-relaxed">
+                    Setiap klaim yang Anda lakukan akan langsung mengupdate file Google Sheets pusat. 
+                    Maksimal tim pengajar per kelas adalah <strong>{MAX_LECTURERS} Dosen</strong>.
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {availableToPick.length > 0 ? availableToPick.map(s => {
                     const claimedCount = s.claimants?.length || 0;
@@ -293,29 +323,49 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                             <h4 className="font-black text-xl text-slate-800">{s.name}</h4>
                           </div>
                           <p className="text-slate-500 font-bold text-sm">{s.day}, {s.startTime} - {s.endTime} @ {s.room}</p>
+                          <div className="flex items-center gap-2">
+                             {s.claimants?.length > 0 ? (
+                               s.claimants.map(c => (
+                                 <div key={c.nip} className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] font-bold text-indigo-600 border-2 border-white" title={c.name}>
+                                   {c.name.charAt(0)}
+                                 </div>
+                               ))
+                             ) : (
+                               <span className="text-[10px] text-slate-300 font-bold italic uppercase tracking-widest">Belum ada tim pengajar</span>
+                             )}
+                          </div>
                         </div>
-                        <button onClick={() => handleDosenPickSchedule(s.id)} disabled={isFull} className={`w-full sm:w-auto px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-sm ${isFull ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-white text-indigo-600 border-2 border-indigo-50 hover:bg-indigo-600 hover:text-white'}`}>
-                          {isFull ? 'PENUH' : 'KLAIM'}
+                        <button 
+                          onClick={() => handleDosenPickSchedule(s.id)} 
+                          disabled={isFull} 
+                          className={`w-full sm:w-auto px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-sm active:scale-95 ${isFull ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-white text-indigo-600 border-2 border-indigo-50 hover:bg-indigo-600 hover:text-white'}`}
+                        >
+                          {isFull ? 'PENUH' : 'KLAIM SEKARANG'}
                         </button>
                       </div>
                     );
-                  }) : <div className="md:col-span-2 text-center py-20 border-[3px] border-dashed border-slate-50 rounded-[3rem]">Kosong</div>}
+                  }) : (
+                    <div className="md:col-span-2 text-center py-20 border-[3px] border-dashed border-slate-50 rounded-[3rem]">
+                       <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Tidak ada jadwal tersedia di periode ini</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
         )}
 
+        {/* ... Tab Monitoring & Master Dosen tetap sama ... */}
         {activeTab === 'Monitoring' && isAdmin && (
           <div className="animate-in fade-in duration-500">
              <div className="flex justify-between items-center mb-8">
-               <h3 className="text-3xl font-black text-slate-800">Monitoring Real-time</h3>
-               <button onClick={() => window.print()} className="bg-slate-800 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-black transition-all">Cetak</button>
+               <h3 className="text-3xl font-black text-slate-800">Laporan Real-time Sheets</h3>
+               <button onClick={() => window.print()} className="bg-slate-800 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-black transition-all">Cetak Laporan</button>
              </div>
              <div className="overflow-x-auto rounded-[1.5rem] border border-slate-100">
                <table className="w-full text-left">
                  <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-black tracking-widest">
-                   <tr><th className="py-6 px-6">Mata Kuliah</th><th className="py-6 px-6 text-center">Kelas</th><th className="py-6 px-6 text-center">Slot</th><th className="py-6 px-6">Dosen</th></tr>
+                   <tr><th className="py-6 px-6">Mata Kuliah</th><th className="py-6 px-6 text-center">Kelas</th><th className="py-6 px-6 text-center">Slot</th><th className="py-6 px-6">Dosen Pengajar</th></tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
                    {currentPeriodSchedules.map(s => (
@@ -328,7 +378,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                          </span>
                        </td>
                        <td className="py-6 px-6 text-xs font-bold text-slate-500">
-                         {s.claimants?.map(c => <div key={c.nip}>• {c.name}</div>) || 'Kosong'}
+                         {s.claimants && s.claimants.length > 0 ? (
+                            <div className="space-y-1">
+                              {s.claimants.map(c => <div key={c.nip} className="flex items-center space-x-2"><span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span><span>{c.name}</span></div>)}
+                            </div>
+                         ) : <span className="text-slate-300 italic">Belum ada dosen</span>}
                        </td>
                      </tr>
                    ))}
@@ -342,10 +396,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
            <div className="space-y-10 animate-in fade-in slide-in-from-left-4 duration-500">
              <div className="flex justify-between items-center">
                <div>
-                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Tenaga Pendidik</h3>
-                <p className="text-slate-500 text-sm">Sinkronisasi data dosen seluruh perangkat.</p>
+                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Master Dosen (Tab Lecturers)</h3>
+                <p className="text-slate-500 text-sm font-medium mt-1">Daftar tenaga pendidik yang tersinkronisasi di Cloud.</p>
                </div>
-               <button onClick={() => setShowAddLecturerModal(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-[1.25rem] font-bold text-xs uppercase tracking-wider hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center">
+               <button onClick={() => setShowAddLecturerModal(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-[1.25rem] font-bold text-xs uppercase tracking-wider hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center transition-all active:scale-95">
                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
                  Tambah Dosen
                </button>
@@ -361,18 +415,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
                   <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                     <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                      <h4 className="text-xl font-black text-slate-800">Tambah Dosen</h4>
+                      <h4 className="text-xl font-black text-slate-800">Registrasi Dosen Baru</h4>
                       <button onClick={() => setShowAddLecturerModal(false)} className="text-slate-400 hover:text-slate-600"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
                     </div>
                     <form onSubmit={handleAddLecturer} className="p-8 space-y-6">
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Nama Lengkap</label>
-                          <input type="text" value={newLecturer.name} onChange={(e) => setNewLecturer({...newLecturer, name: e.target.value.toUpperCase()})} className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold outline-none focus:ring-2 focus:ring-indigo-500" placeholder="NAMA DAN GELAR" required />
+                          <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Nama Lengkap & Gelar</label>
+                          <input type="text" value={newLecturer.name} onChange={(e) => setNewLecturer({...newLecturer, name: e.target.value.toUpperCase()})} className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold outline-none focus:ring-2 focus:ring-indigo-500" placeholder="CONTOH: DR. FULAN, M.T." required />
                         </div>
                         <div>
-                          <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">NIP / NIM</label>
-                          <input type="text" value={newLecturer.nip} onChange={(e) => setNewLecturer({...newLecturer, nip: e.target.value})} className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ID UNIK" required />
+                          <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Nomor Induk Pegawai (NIP)</label>
+                          <input type="text" value={newLecturer.nip} onChange={(e) => setNewLecturer({...newLecturer, nip: e.target.value})} className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 font-bold outline-none focus:ring-2 focus:ring-indigo-500" placeholder="18 DIGIT ANGKA" required />
                         </div>
                         <div>
                           <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Jabatan Fungsional</label>
@@ -387,7 +441,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                       </div>
                       <div className="pt-4 flex space-x-4">
                         <button type="button" onClick={() => setShowAddLecturerModal(false)} className="flex-1 py-4 rounded-2xl font-bold text-slate-500 hover:bg-slate-50">Batal</button>
-                        <button type="submit" className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Simpan</button>
+                        <button type="submit" className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all active:scale-95">Simpan Data</button>
                       </div>
                     </form>
                   </div>

@@ -17,13 +17,15 @@ const firebaseConfig = {
   appId: env.FIREBASE_APP_ID
 };
 
-// Fungsi validasi sederhana untuk memastikan env sudah terisi
+/**
+ * Validasi: Pengecekan apakah placeholder sudah diganti.
+ * Menggunakan string unik dari siakadpdb untuk memastikan sudah terisi.
+ */
 export const isFirebaseConfigValid = 
   firebaseConfig.apiKey && 
-  firebaseConfig.apiKey !== "MASUKKAN_API_KEY_ANDA" &&
-  firebaseConfig.projectId.includes("project-pdb");
+  firebaseConfig.apiKey !== "MASUKKAN_API_KEY_DISINI" && 
+  firebaseConfig.projectId === "siakadpdb";
 
-// Inisialisasi App hanya jika config valid untuk mencegah crash total
 let dbInstance: any = null;
 
 if (isFirebaseConfigValid) {
@@ -33,14 +35,16 @@ if (isFirebaseConfigValid) {
       cacheSizeBytes: CACHE_SIZE_UNLIMITED
     });
 
-    // Aktifkan Offline Support (Sangat penting untuk Dosen dengan sinyal lemah)
-    enableIndexedDbPersistence(dbInstance).catch((err) => {
-      if (err.code === 'failed-precondition') {
-        console.warn("Firestore Persistence: Gagal karena banyak tab terbuka.");
-      } else if (err.code === 'unimplemented') {
-        console.warn("Firestore Persistence: Browser tidak mendukung.");
-      }
-    });
+    // Mengaktifkan penyimpanan lokal (Offline Support)
+    if (typeof window !== "undefined") {
+      enableIndexedDbPersistence(dbInstance).catch((err) => {
+        if (err.code === 'failed-precondition') {
+          console.warn("Firestore Persistence: Gagal karena banyak tab terbuka.");
+        } else if (err.code === 'unimplemented') {
+          console.warn("Firestore Persistence: Browser tidak mendukung.");
+        }
+      });
+    }
   } catch (e) {
     console.error("Firebase Initialization Error:", e);
   }
