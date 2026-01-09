@@ -1,36 +1,49 @@
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { 
+  enableIndexedDbPersistence, 
+  initializeFirestore, 
+  CACHE_SIZE_UNLIMITED 
+} from "firebase/firestore";
 
-// Konfigurasi Firebase Anda
-// PENTING: Salin config object dari Firebase Console -> Project Settings -> General -> Your apps
-export const firebaseConfig = {
-  // Ganti nilai-nilai di bawah ini dengan config asli dari Firebase Console Anda
-  apiKey: "AIzaSy...", 
-  authDomain: "project-pdb.firebaseapp.com",
-  projectId: "project-pdb",
-  storageBucket: "project-pdb.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+const env = (window as any).process.env;
+
+const firebaseConfig = {
+  apiKey: env.FIREBASE_API_KEY,
+  authDomain: env.FIREBASE_AUTH_DOMAIN,
+  projectId: env.FIREBASE_PROJECT_ID,
+  storageBucket: env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: env.FIREBASE_APP_ID
 };
 
-// Inisialisasi Firebase
-const app = initializeApp(firebaseConfig);
+// Fungsi validasi sederhana untuk memastikan env sudah terisi
+export const isFirebaseConfigValid = 
+  firebaseConfig.apiKey && 
+  firebaseConfig.apiKey !== "MASUKKAN_API_KEY_ANDA" &&
+  firebaseConfig.projectId.includes("project-pdb");
 
-// Ekspor instance database untuk digunakan di seluruh aplikasi
-export const db = getFirestore(app);
+// Inisialisasi App hanya jika config valid untuk mencegah crash total
+let dbInstance: any = null;
 
-// --- CHECKPOINT RESTORE (OFFLINE PERSISTENCE) ---
-// Ini memungkinkan aplikasi bekerja offline dan memuat data instan saat refresh
-enableIndexedDbPersistence(db)
-  .catch((err) => {
-      if (err.code == 'failed-precondition') {
-          // Multiple tabs open, persistence can only be enabled in one tab at a a time.
-          console.warn('Firestore Persistence: Multiple tabs open, persistence disabled in this tab.');
-      } else if (err.code == 'unimplemented') {
-          // The current browser does not support all of the features required to enable persistence
-          console.warn('Firestore Persistence: Browser not supported.');
+if (isFirebaseConfigValid) {
+  try {
+    const app = initializeApp(firebaseConfig);
+    dbInstance = initializeFirestore(app, {
+      cacheSizeBytes: CACHE_SIZE_UNLIMITED
+    });
+
+    // Aktifkan Offline Support (Sangat penting untuk Dosen dengan sinyal lemah)
+    enableIndexedDbPersistence(dbInstance).catch((err) => {
+      if (err.code === 'failed-precondition') {
+        console.warn("Firestore Persistence: Gagal karena banyak tab terbuka.");
+      } else if (err.code === 'unimplemented') {
+        console.warn("Firestore Persistence: Browser tidak mendukung.");
       }
-  });
+    });
+  } catch (e) {
+    console.error("Firebase Initialization Error:", e);
+  }
+}
 
-export const isFirebaseConfigValid = true;
+export const db = dbInstance;

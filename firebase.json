@@ -7,7 +7,20 @@
       "**/.*",
       "**/node_modules/**",
       "vercel.json",
-      ".firebaserc"
+      ".firebaserc",
+      "README.md",
+      "package.json"
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css|html|png|jpg|jpeg|gif|svg|ico|json|txt|woff|woff2|ttf|eot)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=3600"
+          }
+        ]
+      }
     ],
     "rewrites": [
       {

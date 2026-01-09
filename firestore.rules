@@ -1,0 +1,27 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Aturan untuk Jadwal (Schedules)
+    match /schedules/{scheduleId} {
+      // Siapa saja bisa membaca jadwal
+      allow read: if true;
+      // Hanya user yang terdaftar (Dosen/Admin) yang bisa mengupdate/menulis
+      // Dalam prototipe ini kita izinkan tulis selama ada payload valid
+      allow write: if request.resource.data.keys().hasAll(['name', 'classCode']);
+    }
+
+    // Aturan untuk Data Dosen
+    match /lecturers/{lecturerId} {
+      allow read: if true;
+      allow write: if true; // Sebaiknya batasi hanya admin di fase berikutnya
+    }
+
+    // Aturan untuk Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
