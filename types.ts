@@ -6,6 +6,12 @@ export interface User {
   nmJabatanFungsional?: string;
 }
 
+export interface Lecturer {
+  name: string;
+  nip: string;
+  nmJabatanFungsional: string;
+}
+
 export interface Course {
   id: string;
   code: string;
@@ -36,6 +42,8 @@ export interface Room {
   id: string;
   name: string;
   capacity: number;
+  location?: string;
+  building?: string;
 }
 
 export enum TabType {

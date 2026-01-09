@@ -63,7 +63,11 @@ const UpdateScheduleForm: React.FC<UpdateScheduleFormProps> = ({ course, onSave,
             required
           >
             <option value="">-- Pilih Ruangan --</option>
-            {MOCK_ROOMS.map(r => <option key={r.id} value={r.name}>{r.name} (Kaps: {r.capacity})</option>)}
+            {MOCK_ROOMS.map(r => (
+              <option key={r.id} value={r.name}>
+                {r.name} - {r.location} (Kaps: {r.capacity})
+              </option>
+            ))}
           </select>
         </div>
 

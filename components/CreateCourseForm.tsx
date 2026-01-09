@@ -282,7 +282,11 @@ const CreateCourseForm: React.FC<CreateCourseFormProps> = ({ onSave, onBulkSave,
             <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Ruangan</label>
             <select name="room" value={formData.room} onChange={handleChange} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" required>
               <option value="">Pilih Ruangan</option>
-              {MOCK_ROOMS.map(r => <option key={r.id} value={r.name}>{r.name} (Kaps: {r.capacity})</option>)}
+              {MOCK_ROOMS.map(r => (
+                <option key={r.id} value={r.name}>
+                  {r.name} - {r.location} (Kaps: {r.capacity})
+                </option>
+              ))}
             </select>
           </div>
 

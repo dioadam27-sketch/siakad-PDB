@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, AvailableSchedule } from '../types.ts';
-import { ACADEMIC_PERIODS } from '../constants.tsx';
+import { User, AvailableSchedule, Lecturer } from '../types.ts';
+import { ACADEMIC_PERIODS, MOCK_ROOMS } from '../constants.tsx';
 import CourseTable from './CourseTable.tsx';
 import CreateCourseForm from './CreateCourseForm.tsx';
 import * as dbService from '../dbService.ts';
@@ -17,11 +17,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
   const [globalActivePeriodId, setGlobalActivePeriodId] = useState(dbService.getActivePeriodId());
   const [selectedPeriod, setSelectedPeriod] = useState(initialPeriodId || dbService.getActivePeriodId());
   const [availableSchedules, setAvailableSchedules] = useState<AvailableSchedule[]>([]);
-  const [lecturersList, setLecturersList] = useState<any[]>([]);
+  const [lecturersList, setLecturersList] = useState<Lecturer[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('Rincian');
   const [isLoading, setIsLoading] = useState(true);
   const [isSwitchingPage, setIsSwitchingPage] = useState(false);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+
+  // State untuk Modal Tambah Dosen
+  const [showAddLecturerModal, setShowAddLecturerModal] = useState(false);
+  const [newLecturer, setNewLecturer] = useState({ name: '', nip: '', nmJabatanFungsional: 'Asisten Ahli' });
 
   const isAdmin = user.role === 'Admin';
   const MAX_LECTURERS = 2;
@@ -109,6 +113,29 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
     }
   };
 
+  const handleAddLecturer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if(!newLecturer.name || !newLecturer.nip) {
+      alert("Nama dan NIP wajib diisi.");
+      return;
+    }
+
+    try {
+      await dbService.addLecturerToDb(newLecturer);
+      setShowAddLecturerModal(false);
+      setNewLecturer({ name: '', nip: '', nmJabatanFungsional: 'Asisten Ahli' });
+      alert("Dosen berhasil ditambahkan.");
+    } catch (error: any) {
+      alert(error.message);
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    if(confirm("Unduh data lengkap database (Format JSON)?")) {
+      await dbService.downloadDatabaseBackup();
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
@@ -136,6 +163,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+             {isAdmin && (
+               <button 
+                 onClick={handleDownloadBackup}
+                 className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center space-x-2 border border-indigo-200 transition-all active:scale-95"
+                 title="Download backup database"
+               >
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                 </svg>
+                 <span className="text-xs font-black uppercase tracking-widest">Backup DB</span>
+               </button>
+             )}
              <div className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-2xl flex items-center space-x-3">
                <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sistem Online</span>
@@ -162,7 +201,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
       </div>
 
       {/* Content Area */}
-      <div className="bg-white rounded-[3rem] shadow-sm border border-slate-100 min-h-[600px] p-8 md:p-12">
+      <div className="bg-white rounded-[3rem] shadow-sm border border-slate-100 min-h-[600px] p-8 md:p-12 relative">
         
         {/* Tab Rincian */}
         {activeTab === 'Rincian' && (
@@ -262,6 +301,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                     const claimedCount = s.claimants?.length || 0;
                     const remainingSlots = MAX_LECTURERS - claimedCount;
                     const isFull = remainingSlots <= 0;
+                    const roomDetails = MOCK_ROOMS.find(r => r.name === s.room);
                     
                     return (
                       <div key={s.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 group hover:shadow-2xl transition-all duration-500 relative overflow-hidden">
@@ -282,7 +322,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
                                {s.day}, {s.startTime} - {s.endTime}
                              </p>
                              <p className="text-slate-500 font-bold text-sm flex items-center">
-                               Ruang {s.room}
+                               Ruang {s.room} {roomDetails && <span className="text-slate-400 font-normal ml-1">({roomDetails.location})</span>}
                              </p>
                           </div>
                         </div>
@@ -347,22 +387,96 @@ const Dashboard: React.FC<DashboardProps> = ({ user, initialPeriodId }) => {
         )}
 
         {activeTab === 'Master Dosen' && isAdmin && (
-           <div className="space-y-10 animate-in fade-in duration-700">
+           <div className="space-y-10 animate-in fade-in duration-700 relative">
              <div className="flex justify-between items-center mb-4">
-               <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database Tenaga Pendidik</h3>
-               <div className="bg-indigo-600 text-white px-6 py-3 rounded-[1.25rem] font-black text-xs uppercase tracking-[0.2em]">{lecturersList.length} Dosen</div>
+               <div>
+                <h3 className="text-3xl font-black text-slate-800 tracking-tight">Database Tenaga Pendidik</h3>
+                <p className="text-slate-500 text-sm mt-1">Kelola data dosen pengajar.</p>
+               </div>
+               <div className="flex items-center space-x-3">
+                 <button 
+                  onClick={() => setShowAddLecturerModal(true)}
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-[1.25rem] font-bold text-xs uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center"
+                 >
+                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+                   Tambah Dosen
+                 </button>
+                 <div className="bg-indigo-50 text-indigo-700 px-6 py-3 rounded-[1.25rem] font-black text-xs uppercase tracking-[0.2em] border border-indigo-100">
+                    {lecturersList.length} Dosen
+                 </div>
+               </div>
              </div>
+
              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                {lecturersList.map(l => (
                  <div key={l.nip} className="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center group hover:shadow-2xl transition-all border-l-[6px] hover:border-l-indigo-600">
-                   <div className="space-y-1">
+                   <div className="space-y-1 overflow-hidden">
                      <p className="font-black text-slate-800 text-lg leading-tight truncate">{l.name}</p>
                      <p className="text-[10px] font-bold text-slate-400 tracking-[0.1em]">NIP. {l.nip}</p>
+                     <p className="text-[10px] font-bold text-indigo-500 tracking-wider bg-indigo-50 inline-block px-2 py-0.5 rounded-lg mt-1">{l.nmJabatanFungsional || '-'}</p>
                    </div>
-                   <button onClick={async () => { if(confirm(`Hapus data ${l.name}?`)) await dbService.deleteLecturerFromDb(l.nip); }} className="p-3 text-slate-200 hover:text-red-500 rounded-2xl transition-all"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                   <button onClick={async () => { if(confirm(`Hapus data ${l.name}?`)) await dbService.deleteLecturerFromDb(l.nip); }} className="p-3 text-slate-200 hover:text-red-500 rounded-2xl transition-all ml-2 flex-shrink-0 hover:bg-red-50"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                  </div>
                ))}
              </div>
+
+             {/* Modal Tambah Dosen */}
+             {showAddLecturerModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                    <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                      <h4 className="text-xl font-black text-slate-800">Tambah Dosen Baru</h4>
+                      <button onClick={() => setShowAddLecturerModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    <form onSubmit={handleAddLecturer} className="p-8 space-y-6">
+                      <div>
+                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Nama Lengkap (dengan Gelar)</label>
+                        <input 
+                          type="text" 
+                          value={newLecturer.name}
+                          onChange={(e) => setNewLecturer({...newLecturer, name: e.target.value.toUpperCase()})}
+                          className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                          placeholder="CONTOH: DR. BUDI SANTOSO, M.KES"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">NIP (Nomor Induk Pegawai)</label>
+                        <input 
+                          type="text" 
+                          value={newLecturer.nip}
+                          onChange={(e) => setNewLecturer({...newLecturer, nip: e.target.value.replace(/\D/g,'')})}
+                          className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                          placeholder="Contoh: 198001012005011001"
+                          required
+                        />
+                        <p className="text-[10px] text-slate-400 mt-2 ml-1">NIP akan digunakan sebagai password login awal.</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Jabatan Fungsional</label>
+                        <select
+                          value={newLecturer.nmJabatanFungsional}
+                          onChange={(e) => setNewLecturer({...newLecturer, nmJabatanFungsional: e.target.value})}
+                          className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                        >
+                          <option value="Asisten Ahli">Asisten Ahli</option>
+                          <option value="Lektor">Lektor</option>
+                          <option value="Lektor Kepala">Lektor Kepala</option>
+                          <option value="Guru Besar">Guru Besar</option>
+                          <option value="Tenaga Pengajar">Tenaga Pengajar</option>
+                          <option value="Belum Punya Jabatan Fungsional">Belum Punya Jabatan Fungsional</option>
+                        </select>
+                      </div>
+                      <div className="pt-4 flex space-x-4">
+                        <button type="button" onClick={() => setShowAddLecturerModal(false)} className="flex-1 py-4 rounded-2xl font-bold text-slate-500 hover:bg-slate-50 transition-colors">Batal</button>
+                        <button type="submit" className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100">Simpan Data</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+             )}
            </div>
         )}
 

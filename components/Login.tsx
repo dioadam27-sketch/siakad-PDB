@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { LECTURERS } from '../constants';
+import { loginApi, downloadDatabaseBackup } from '../dbService';
 
 interface LoginProps {
   onLogin: (nip: string, name: string, role: 'Dosen' | 'Admin', nmJabatanFungsional?: string) => void;
@@ -24,40 +23,47 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setPassword('');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    // Simulate API delay
-    setTimeout(() => {
-      if (selectedRole === 'Admin') {
-        if (nip === 'admin' && password === 'admin') {
-          onLogin('198704122014041001', 'Administrator', 'Admin');
+    try {
+      const user = await loginApi(nip, password);
+      
+      if (user) {
+        if (user.role !== selectedRole) {
+          setError(`Akun ini bukan akun ${selectedRole}. Silakan ganti peran login.`);
         } else {
-          setError('Username atau Kata Sandi admin salah. Gunakan admin/admin.');
+          onLogin(user.nip, user.name, user.role, user.nmJabatanFungsional);
         }
-      } else if (selectedRole === 'Dosen') {
-        // Find lecturer in the provided list
-        const lecturer = LECTURERS.find(l => l.nip === nip);
-        
-        if (lecturer) {
-          if (nip === password) {
-            onLogin(nip, lecturer.name, 'Dosen', lecturer.nmJabatanFungsional);
-          } else {
-            setError('Kata Sandi harus sama dengan NIP.');
-          }
-        } else {
-          setError('NIP tidak terdaftar dalam basis data Dosen PDB.');
-        }
+      } else {
+        setError("NIP atau Kata Sandi salah.");
       }
+    } catch (err) {
+      setError("Terjadi kesalahan koneksi server.");
+    } finally {
       setLoading(false);
-    }, 800);
+    }
   };
 
   if (view === 'SELECT_ROLE') {
     return (
-      <div className="min-h-screen bg-[#3730A3] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#3730A3] flex items-center justify-center p-4 relative">
+        {/* Tombol Backup DB di Halaman Depan */}
+        <div className="absolute top-6 right-6 z-10">
+            <button
+                onClick={downloadDatabaseBackup}
+                className="flex items-center space-x-2 text-indigo-200 hover:text-white transition-colors bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl backdrop-blur-md border border-white/10 active:scale-95"
+                title="Download Backup Database"
+            >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span className="text-sm font-bold">Backup Database</span>
+            </button>
+        </div>
+
         <div className="w-full max-w-4xl">
           <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4 duration-700">
             <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">Sistem Akademik PDB</h1>
